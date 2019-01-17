@@ -8,7 +8,22 @@ Extended results and code explanation supporting paper *Message-Passing Neural N
 In [mpnn](mpnn) we provide a TensorFlow implementation of neural message passing architecture described in the paper.
 
 
-**If you decide to apply the concepts presented or base on the provided code, please do refer our paper: Krzysztof Rusek and Piotr Chołda, ''Message-Passing Neural Networks Learn Little's Law'', IEEE Communications Letters, 2018, *accepted for publication*.**
+**If you decide to apply the concepts presented or base on the provided code, please do refer our paper: K. Rusek and P. Chołda, "Message-Passing Neural Networks Learn Little’s Law," in IEEE Communications Letters. doi: 10.1109/LCOMM.2018.2886259.**
+
+```
+@ARTICLE{8572801, 
+author={K. Rusek and P. Chołda}, 
+journal={IEEE Communications Letters}, 
+title={Message-Passing Neural Networks Learn Little’s Law}, 
+year={2018}, 
+volume={}, 
+number={}, 
+pages={1-1}, 
+keywords={Delays;Neural networks;Topology;Routing;Network topology;Tools;Machine learning;Knowledge plane;machine learning;message-passing neural networks (MPNN);queuing networks;random graphs}, 
+doi={10.1109/LCOMM.2018.2886259}, 
+ISSN={1089-7798}, 
+month={},}
+```
 
 ## routenet
 
