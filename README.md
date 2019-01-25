@@ -27,6 +27,8 @@ month={},}
 
 ## routenet
 
-RouteNet is a neural architecture for network performance evaluation first proposed in the paper *Unveiling the potential of GNN for network modeling and optimization in SDN* by K. Rusek, J. Suárez-Varela, A. Mestres, P. Barlet-Ros, A. Cabellos-Aparicio accepted for ACM Symposium on SDN Research, April 2019, San Jose, CA, USA.
+RouteNet is a neural architecture for network performance evaluation first proposed in the paper 
+
+*Unveiling the potential of GNN for network modeling and optimization in SDN* by K. Rusek, J. Suárez-Varela, A. Mestres, P. Barlet-Ros, A. Cabellos-Aparicio accepted for ACM Symposium on SDN Research, April 2019, San Jose, CA, USA. [arXiv:1901.08113](https://arxiv.org/abs/1901.08113)
 
 Imlementation is provided in  [routenet](routenet). 
