@@ -1,5 +1,4 @@
-# author:
-# - 'Krzysztof Rusek [^1]'
+# Copyright (c) 2018, Krzysztof Rusek [^1]
 # 
 # [^1]: AGH University of Science and Technology, Department of
 #     communications, Krakow, Poland. Email: krusek\@agh.edu.pl
@@ -265,6 +264,11 @@ def infer_routing_geant(data_file):
     replace('delaysGeant2','routingsGeant2')
     return rf
 
+def infer_routing_gbn(data_file):
+    rf=re.sub(r'dGlobal_\d+_\d+_','Routing_', data_file).\
+    replace('delay','routing')
+    return rf
+
 
 def input_fn(samples,hparams,shuffle=True):
     f = ((samples.features-0.2)/0.15).astype(np.float32)
@@ -308,15 +312,42 @@ def parse(serialized, target='delay'):
                 if k == 'delay':
                     features[k] = (features[k]-2.8)/2.5
                 if k == 'traffic':
-                    #features[k] = (features[k]-0.76)/.008
                     features[k] = (features[k]-0.5)/.5
-                if k == 'drops':
-                    features[k] = (features[k])/12000/(0.5*features['traffic']+0.5) #loss rate
-                #if k == 'jitter':
-                    #features[k] = (tf.math.log( features[k] )-2.0)/2.0 #logjitter
+                if k == 'jitter':
+                    features[k] = (features[k]-1.5)/1.5
+
 
 
     return {k:v for k,v in features.items() if k is not target },features[target]
+
+def cummax(alist, extractor):
+    with tf.name_scope('cummax'):
+        maxes = [tf.reduce_max( extractor(v) ) + 1 for v in alist ]
+        cummaxes = [tf.zeros_like(maxes[0])]
+        for i in range(len(maxes)-1):
+            cummaxes.append( tf.math.add_n(maxes[0:i+1]))
+        
+    return cummaxes
+        
+
+def transformation_func(it, batch_size=32):
+    with tf.name_scope("transformation_func"):
+        vs = [it.get_next() for _ in range(batch_size)]
+        
+        links_cummax = cummax(vs,lambda v:v[0]['links'] )
+        paths_cummax = cummax(vs,lambda v:v[0]['paths'] )
+        
+        tensors = ({
+                'traffic':tf.concat([v[0]['traffic'] for v in vs], axis=0),
+                'sequances':tf.concat([v[0]['sequances'] for v in vs], axis=0),
+                'links':tf.concat([v[0]['links'] + m for v,m in zip(vs, links_cummax) ], axis=0),
+                'paths':tf.concat([v[0]['paths'] + m for v,m in zip(vs, paths_cummax) ], axis=0),
+                'n_links':tf.math.add_n([v[0]['n_links'] for v in vs]),
+                'n_paths':tf.math.add_n([v[0]['n_paths'] for v in vs]),
+                'n_total':tf.math.add_n([v[0]['n_total'] for v in vs])
+            },   tf.concat([v[1] for v in vs], axis=0))
+    
+    return tensors
 
 def tfrecord_input_fn(filenames,hparams,shuffle_buf=1000, target='delay'):
     
@@ -330,38 +361,21 @@ def tfrecord_input_fn(filenames,hparams,shuffle_buf=1000, target='delay'):
         ds = ds.apply(tf.contrib.data.shuffle_and_repeat(shuffle_buf))
     ds = ds.map(lambda buf:parse(buf,target), 
         num_parallel_calls=2)
+    ds=ds.prefetch(10)
 
-
-    shapes=({
-    'traffic':[hparams.node_count*(hparams.node_count-1)],
-    'links':[-1],
-    'paths':[-1],
-    'sequances':[-1],
-    'n_links':[], 
-    'n_paths':[],
-    'n_total':[]
-    },[hparams.node_count*(hparams.node_count-1)])
-    ds = ds.padded_batch(hparams.batch_size,shapes)
+    it =ds.make_one_shot_iterator()
+    sample = transformation_func(it,hparams.batch_size)
     
-    ds = ds.prefetch(1)
 
-    sample = ds.make_one_shot_iterator().get_next()
-    
     return sample
 
-
-
 class ComnetModel(tf.keras.Model):
-    def __init__(self,hparams, output_units=1):
+    def __init__(self,hparams, output_units=1, final_activation=None):
         super(ComnetModel, self).__init__()
         self.hparams = hparams
 
-        self.edge_update = tf.nn.rnn_cell.GRUCell(hparams.link_state_dim, dtype=tf.float32)
-        self.path_update = tf.nn.rnn_cell.GRUCell(hparams.path_state_dim, dtype=tf.float32)
-
-        # wait for tf 1.11
-        #self.edge_update = tf.keras.layers.GRUCell(hparams.link_state_dim)
-        #self.path_update = tf.keras.layers.GRUCell(hparams.path_state_dim)
+        self.edge_update = tf.keras.layers.GRUCell(hparams.link_state_dim)
+        self.path_update = tf.keras.layers.GRUCell(hparams.path_state_dim)
 
         
         self.readout = tf.keras.models.Sequential()
@@ -375,16 +389,18 @@ class ComnetModel(tf.keras.Model):
                 kernel_regularizer=tf.contrib.layers.l2_regularizer(hparams.l2)))
         self.readout.add(keras.layers.Dropout(rate=hparams.dropout_rate))
 
-        self.readout.add(keras.layers.Dense(output_units, kernel_regularizer=tf.contrib.layers.l2_regularizer(hparams.l2_2)))
+        self.readout.add(keras.layers.Dense(output_units, 
+                kernel_regularizer=tf.contrib.layers.l2_regularizer(hparams.l2_2),
+                activation = final_activation ) )
 
             
     def build(self, input_shape=None):
         del input_shape
-        #TODO unify with keras when tf 1.11 is available on plgrid
         self.edge_update.build(tf.TensorShape([None,self.hparams.path_state_dim]))
         self.path_update.build(tf.TensorShape([None,self.hparams.link_state_dim]))
         self.readout.build(input_shape = [None,self.hparams.path_state_dim])
         self.built = True
+    
     
     def call(self, inputs, training=False):
         f_ = inputs
@@ -392,13 +408,13 @@ class ComnetModel(tf.keras.Model):
         link_state = tf.zeros(shape)
         shape = tf.stack([f_['n_paths'],self.hparams.path_state_dim-1], axis=0)
         path_state = tf.concat([
-            tf.expand_dims(f_['traffic'],axis=1),
+            tf.expand_dims(f_['traffic'][0:f_["n_paths"]],axis=1),
             tf.zeros(shape)
         ], axis=1)
 
-        links = f_['links'][0:f_["n_total"]]
-        paths = f_['paths'][0:f_["n_total"]]
-        seqs=  f_['sequances'][0:f_["n_total"]]
+        links = f_['links']
+        paths = f_['paths']
+        seqs=  f_['sequances']
         
         for _ in range(self.hparams.T):
         
@@ -418,18 +434,15 @@ class ComnetModel(tf.keras.Model):
                                                     dtype=tf.float32)
             m = tf.gather_nd(outputs,ids)
             m = tf.unsorted_segment_sum(m, links ,f_['n_links'])
-            _,link_state = self.edge_update(m, link_state)
 
-            # wait for tf 1.11
-            #link_state,_ = self.edge_update(m, [link_state])
+            #Keras cell expects a list
+            link_state,_ = self.edge_update(m, [link_state])
             
-        
-        r = self.readout(path_state,training=training)
+        if self.hparams.learn_embedding:
+            r = self.readout(path_state,training=training)
+        else:
+            r = self.readout(tf.stop_gradient(path_state),training=training)
 
-        # remove to have inference from path state
-        # Thsi forces additive model for delay
-        #r = tf.gather(r,links)
-        #r = tf.segment_sum(r,segment_ids=paths)
         return r
     
 
@@ -444,9 +457,16 @@ def model_fn(
     model = ComnetModel(params)
     model.build()
 
-    predictions = tf.map_fn(lambda x: model(x,training=mode==tf.estimator.ModeKeys.TRAIN), 
-                    features,dtype=tf.float32)
-    #predictions = model(features,training=mode==tf.estimator.ModeKeys.TRAIN)
+    def fn(x):
+        r = model(x,training=mode==tf.estimator.ModeKeys.TRAIN)
+        # TODO padding breaks metrics !
+        #r = tf.pad(r,[[0,tf.shape(labels)[1] - tf.shape(r)[0]],[0,0]])
+        return r
+
+
+    #predictions = tf.map_fn(fn, features,dtype=tf.float32)
+    predictions = fn(features)
+
     predictions = tf.squeeze(predictions)
 
     if mode == tf.estimator.ModeKeys.PREDICT:
@@ -493,8 +513,10 @@ def model_fn(
     summaries = [tf.summary.histogram(var.op.name, var) for var in trainables]
     summaries += [tf.summary.histogram(g.op.name, g) for g in grads if g is not None]
 
-
-    optimizer=tf.train.AdamOptimizer(params.learning_rate)
+    decayed_lr = tf.train.exponential_decay(params.learning_rate,
+                                            tf.train.get_global_step(), 10000,
+                                            0.7, staircase=True)
+    optimizer=tf.train.AdamOptimizer(decayed_lr)
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.control_dependencies(update_ops):
         train_op = optimizer.apply_gradients(grad_var_pairs,
@@ -520,7 +542,8 @@ hparams = tf.contrib.training.HParams(
     batch_size=32,
     dropout_rate=0.5,
     l2=0.1,
-    l2_2=0.01
+    l2_2=0.01,
+    learn_embedding=True # If false, only the readout is trained
 )
 def train(args):
     print(args)
@@ -532,17 +555,15 @@ def train(args):
     estimator = tf.estimator.Estimator( 
         model_fn = model_fn, 
         model_dir=args.model_dir,
-        params=hparams
+        params=hparams,
+        warm_start_from=args.warm
         )
-    for _ in range(args.epochs):
-        flush()
-        estimator.train(lambda:tfrecord_input_fn(args.train,hparams,shuffle_buf=args.shuffle_buf,target=args.target), 
-            steps=args.train_steps)
-        flush()
-        estimator.evaluate(lambda:tfrecord_input_fn(args.eval_,hparams,shuffle_buf=None,target=args.target), 
-            steps=args.eval_steps)
-        flush()
 
+    train_spec = tf.estimator.TrainSpec(input_fn=lambda:tfrecord_input_fn(args.train,hparams,shuffle_buf=args.shuffle_buf,target=args.target), 
+       max_steps=args.train_steps)
+    eval_spec = tf.estimator.EvalSpec(input_fn=lambda:tfrecord_input_fn(args.eval_,hparams,shuffle_buf=None,target=args.target),steps=None)
+    
+    tf.estimator.train_and_evaluate(estimator, train_spec, eval_spec)
 
 
 def data(args):
@@ -579,6 +600,7 @@ def main():
     parser_train.add_argument('--epochs', help='Train epochs',  type=int, default=300 )
     parser_train.add_argument('--shuffle_buf',help = "Buffer size for samples shuffling", type=int, default=10000)
     parser_train.add_argument('--target',help = "Predicted variable", type=str, default='delay')
+    parser_train.add_argument('--warm',help = "Warm start from", type=str, default=None)
     parser_train.set_defaults(func=train)
     args = parser.parse_args()
 
