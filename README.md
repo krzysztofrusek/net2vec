@@ -12,21 +12,23 @@ In [mpnn](mpnn) we provide a TensorFlow implementation of neural message passing
 
 ```
 @ARTICLE{8572801, 
-author={K. Rusek and P. Chołda}, 
+author={K. {Rusek} and P. {Chołda}}, 
 journal={IEEE Communications Letters}, 
 title={Message-Passing Neural Networks Learn Little’s Law}, 
-year={2018}, 
-volume={}, 
-number={}, 
-pages={1-1}, 
+year={2019}, 
+volume={23}, 
+number={2}, 
+pages={274-277}, 
 keywords={Delays;Neural networks;Topology;Routing;Network topology;Tools;Machine learning;Knowledge plane;machine learning;message-passing neural networks (MPNN);queuing networks;random graphs}, 
 doi={10.1109/LCOMM.2018.2886259}, 
 ISSN={1089-7798}, 
-month={},}
+month={Feb},}
 ```
 
 ## routenet
 
-RouteNet is a neural architecture for network performance evaluation first proposed in the paper *Unveiling the potential of GNN for network modeling and optimization in SDN* by K. Rusek, J. Suárez-Varela, A. Mestres, P. Barlet-Ros, A. Cabellos-Aparicio accepted for ACM Symposium on SDN Research, April 2019, San Jose, CA, USA.
+RouteNet is a neural architecture for network performance evaluation first proposed in the paper 
+
+*Unveiling the potential of GNN for network modeling and optimization in SDN* by K. Rusek, J. Suárez-Varela, A. Mestres, P. Barlet-Ros, A. Cabellos-Aparicio accepted for ACM Symposium on SDN Research, April 2019, San Jose, CA, USA. [arXiv:1901.08113](https://arxiv.org/abs/1901.08113)
 
 Imlementation is provided in  [routenet](routenet). 
