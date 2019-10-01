@@ -1,324 +1,351 @@
-# Copyright (c) 2018, Krzysztof Rusek [^1]
-# 
-# [^1]: AGH University of Science and Technology, Department of
-#     communications, Krakow, Poland. Email: krusek\@agh.edu.pl
-# 
+# Copyright (c) 2018-2019, Krzysztof Rusek
+# All rights reserved.
+
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+
+# * Redistributions of source code must retain the above copyright notice, this
+#   list of conditions and the following disclaimer.
+
+# * Redistributions in binary form must reproduce the above copyright notice,
+#   this list of conditions and the following disclaimer in the documentation
+#   and/or other materials provided with the distribution.
+
+# * Neither the name of the copyright holder nor the names of its
+#   contributors may be used to endorse or promote products derived from
+#   this software without specific prior written permission.
+
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# author: Krzysztof Rusek, AGH
 
 
-import numpy as np
-import pandas as pd
-import networkx as nx
-#import matplotlib.pyplot as plt
-import itertools as it
 import tensorflow as tf
 from tensorflow import keras
-import collections 
-import re
+import numpy as np
 import argparse
-import sys
 
-def genPath(R,s,d,connections):
-    while s != d:
-        yield s
-        s = connections[s][R[s,d]]
-    yield s
+hparams = tf.contrib.training.HParams(
+    node_count=14,
+    link_state_dim=4, 
+    path_state_dim=2,
+    T=3,
+    readout_units=8,
+    learning_rate=0.001,
+    batch_size=32,
+    dropout_rate=0.5,
+    l2=0.1,
+    l2_2=0.01,
+    learn_embedding=True, # If false, only the readout is trained
+    readout_layers=2, # number of hidden layers in readout model
+)
 
-def pairwise(iterable):
-    "s -> (s0,s1), (s1,s2), (s2, s3), ..."
-    a, b = it.tee(iterable)
-    next(b, None)
-    return zip(a, b)
+class RouteNet(tf.keras.Model):
+    def __init__(self,hparams, output_units=1, final_activation=None):
+        super(RouteNet, self).__init__()
+
+        self.hparams = hparams
+        self.output_units = output_units
+        self.final_activation = final_activation
+
+          
+    def build(self, input_shape=None):
+        del input_shape
+
+        self.edge_update = tf.keras.layers.GRUCell(self.hparams.link_state_dim, name="edge_update")
+        self.path_update = tf.keras.layers.GRUCell(self.hparams.path_state_dim, name="path_update")
+
+        
+        self.readout = tf.keras.models.Sequential(name='readout')
+
+        for i in range(self.hparams.readout_layers):
+            self.readout.add(tf.keras.layers.Dense(self.hparams.readout_units, 
+                    activation=tf.nn.selu,
+                    kernel_regularizer=tf.contrib.layers.l2_regularizer(self.hparams.l2)))
+            self.readout.add(tf.keras.layers.Dropout(rate=self.hparams.dropout_rate))
+
+        self.final = keras.layers.Dense(self.output_units, 
+                kernel_regularizer=tf.contrib.layers.l2_regularizer(self.hparams.l2_2),
+                activation = self.final_activation )
+        
+        self.edge_update.build(tf.TensorShape([None,self.hparams.path_state_dim]))
+        self.path_update.build(tf.TensorShape([None,self.hparams.link_state_dim]))
+        self.readout.build(input_shape = [None,self.hparams.path_state_dim])
+        self.final.build(input_shape = [None,self.hparams.path_state_dim + self.hparams.readout_units ])
 
 
-def ned2lists(fname):
-    channels = []
-    with open(fname) as f:
-        p = re.compile(r'\s+node(\d+).port\[(\d+)\]\s+<-->\s+Channel\s+<-->\s+node(\d+).port\[(\d+)\]')
-        for line in f:
-            m=p.match(line)
-            if m:
-                #print(line, m.groups())
-                channels.append(list(map(int,m.groups())))
-    n=max(map(max, channels))+1
-    connections = [{} for i in range(n)]
-    for c in channels:
-        connections[c[0]][c[1]]=c[2]
-        connections[c[2]][c[3]]=c[0]
-    connections = [[v for k,v in sorted(con.items())] 
-                   for con in connections ]
-    return connections,n
-
-
-def extract_links(n, connections):
-    A = np.zeros((n,n))
-
-    for a,c in zip(A,connections):
-        a[c]=1
-
-    G=nx.from_numpy_array(A, create_using=nx.DiGraph())
-    edges=list(G.edges)
-    return edges
-
-def load_and_process(routing_file, data_file,edges,connections,n=15):
-    R=np.loadtxt(routing_file, dtype=np.int32)
-    data = np.loadtxt(data_file)
-    traffic = np.reshape(data[:,0:n*n],(-1,n,n))
-    delay = np.reshape(data[:,n*n:2*n*n],(-1,n,n))
-    #packet_loss = data[:,-1]
+        self.built = True
     
-    paths=[]
-    features=[]
-    labels=[]
+    
+    def call(self, inputs, training=False):
+        '''
 
-    for i in range(n):
-        for j in range(n):
-            if i != j:
-                paths.append([edges.index(tup) for tup in pairwise(genPath(R,i,j,connections))])
-                features.append(traffic[:,i,j])
-                labels.append(delay[:,i,j])
-    features = np.stack(features).T
-    labels = np.stack(labels).T
-    return paths,features,labels
+        outputs:
+            Natural parameter
+        '''
+        f_ = inputs
+        shape = tf.stack([f_['n_links'],self.hparams.link_state_dim-1], axis=0)
+        #link_state = tf.zeros(shape)
+        link_state = tf.concat([
+            tf.expand_dims(f_['capacities'],axis=1),
+            tf.zeros(shape)
+        ], axis=1)
 
-def load(data_file,n, full=False):
-    names=[]
+        shape = tf.stack([f_['n_paths'],self.hparams.path_state_dim-1], axis=0)
+        path_state = tf.concat([
+            tf.expand_dims(f_['traffic'],axis=1),
+            tf.zeros(shape)
+        ], axis=1)
 
-    TM_index=[]
-    delay_index=[]
-    if full:
-        jitter_index=[]
-        drop_index=[]
+        links = f_['links']
+        paths = f_['paths']
+        seqs=  f_['sequences']
+        
+        for _ in range(self.hparams.T):
+        
+            h_ = tf.gather(link_state,links)
 
-    counter=0
-    for i in range(n):
-        for j in range(n):
-            names.append('a{}_{}'.format(i,j))
-            if i != j:
-                TM_index.append(counter)
-            counter += 1
-    for i in range(n):
-        for j in range(n):
-            for k in ['average', 'q10','q20','q50','q80','q90','variance']:
-                names.append('delay{}_{}_{}'.format(i,j,k))
-                if i != j and k == 'average':
-                    delay_index.append(counter)
-                if i != j and k == 'variance' and full:
-                    jitter_index.append(counter)
-                counter += 1
-    for i in range(n):
-        for j in range(n):
-            names.append('drop{}_{}'.format(i,j))
-            if full and i != j:
-                drop_index.append(counter)
-            counter += 1
-    names.append('empty')
+            #TODO move this to feature calculation
+            ids=tf.stack([paths, seqs], axis=1)            
+            max_len = tf.reduce_max(seqs)+1
+            shape = tf.stack([f_['n_paths'], max_len, self.hparams.link_state_dim])
+            lens = tf.segment_sum(data=tf.ones_like(paths),
+                                    segment_ids=paths)
+
+            link_inputs = tf.scatter_nd(ids, h_, shape)
+            #TODO move to tf.keras.RNN
+            outputs, path_state = tf.nn.dynamic_rnn(self.path_update,
+                                                    link_inputs,
+                                                    sequence_length=lens,
+                                                    initial_state = path_state,
+                                                    dtype=tf.float32)
+            m = tf.gather_nd(outputs,ids)
+            m = tf.unsorted_segment_sum(m, links ,f_['n_links'])
+
+            #Keras cell expects a list
+            link_state,_ = self.edge_update(m, [link_state])
             
-    Global=pd.read_csv(data_file ,header=None, names=names,index_col=False)
-    if full:
-        return Global, TM_index, delay_index, jitter_index, drop_index
-    else:
-        return Global, TM_index, delay_index
+        if self.hparams.learn_embedding:
+            r = self.readout(path_state,training=training)
+            o = self.final(tf.concat([r,path_state], axis=1))
+            
+        else:
+            r = self.readout(tf.stop_gradient(path_state),training=training)
+            o = self.final(tf.concat([r, tf.stop_gradient(path_state)], axis=1) )
+            
+        return o
 
-def load_routing(routing_file):
-    R = pd.read_csv(routing_file, header=None, index_col=False)
-    R=R.drop([R.shape[0]], axis=1)
-    return R.values
+
+
+def delay_model_fn(
+   features, # This is batch_features from input_fn
+   labels,   # This is batch_labrange
+   mode,     # An instance of tf.estimator.ModeKeys
+   params):  # Additional configuration
+
    
+    model = RouteNet(params, output_units=2)
+    model.build()
 
-def make_paths(R,connections):
-    n = R.shape[0]
-    edges = extract_links(n, connections)
-    paths=[]
-    for i in range(n):
-        for j in range(n):
-            if i != j:
-                paths.append([edges.index(tup) for tup in pairwise(genPath(R,i,j,connections))])
-    return paths
+    predictions = model(features, training=mode==tf.estimator.ModeKeys.TRAIN)
 
-def make_indices(paths):
-    link_indices=[]
-    path_indices=[]
-    sequ_indices=[]
-    segment=0
-    for p in paths:
-        link_indices += p
-        path_indices += len(p)*[segment]
-        sequ_indices += list(range(len(p)))
-        segment +=1
-    return link_indices, path_indices, sequ_indices
+    loc  = predictions[...,0] 
+    c = np.log(np.expm1( np.float32(0.098) ))
+    scale = tf.math.softplus(c + predictions[...,1]) + np.float32(1e-9)
 
-NetworkSamples = collections.namedtuple('NetworkSamples',['features', 
-                                                            'labels', 'links', 
-                                                            'paths', 'sequances',
-                                                            'n_links',
-                                                            'n_paths'])
+    delay_prediction = loc
+    jitter_prediction = scale**2
 
-def make_samples(routing_file, data_file,connections,n=15):
+
+    if mode == tf.estimator.ModeKeys.PREDICT:
+        return tf.estimator.EstimatorSpec(mode, 
+            predictions={'delay':delay_prediction, 'jitter':jitter_prediction}
+            )
+
+    with tf.name_scope('heteroscedastic_loss'):
+        x=features
+        y=labels
+
+        n=x['packets']-y['drops']
+        _2sigma = np.float32(2.0)*scale**2
+        nll = n*y['jitter']/_2sigma + n*tf.math.squared_difference(y['delay'], loc)/_2sigma + n*tf.math.log(scale)
+        loss = tf.reduce_sum(nll)/np.float32(1e6)
+
+    regularization_loss = sum(model.losses)
+    total_loss = loss + regularization_loss
     
-    edges = extract_links(n,connections)
-    paths,features,labels = load_and_process(routing_file, data_file,edges,connections,n)
+    tf.summary.scalar('regularization_loss', regularization_loss)
+
+
+    if mode == tf.estimator.ModeKeys.EVAL:
+        return tf.estimator.EstimatorSpec(
+            mode,loss=loss,
+            eval_metric_ops={
+                'label/mean/delay':tf.metrics.mean(labels['delay']),
+                'label/mean/jitter':tf.metrics.mean(labels['jitter']),
+                'prediction/mean/delay': tf.metrics.mean(delay_prediction),
+                'prediction/mean/jitter': tf.metrics.mean(jitter_prediction),
+                'mae/delay':tf.metrics.mean_absolute_error(labels['delay'], delay_prediction),
+                'mae/jitter':tf.metrics.mean_absolute_error(labels['jitter'], jitter_prediction),
+                'rho/delay':tf.contrib.metrics.streaming_pearson_correlation(labels=labels['delay'],predictions=delay_prediction),
+                'rho/jitter':tf.contrib.metrics.streaming_pearson_correlation(labels=labels['jitter'],predictions=jitter_prediction)
+            }
+        )
     
-    link_indices=[]
-    path_indices=[]
-    sequ_indices=[]
-    segment=0
-    for p in paths:
-        link_indices += p
-        path_indices += len(p)*[segment]
-        sequ_indices += list(range(len(p)))
-        segment +=1
-        
-        
-    
-    return NetworkSamples(features, 
-                          labels, 
-                          link_indices, 
-                          path_indices, 
-                          sequ_indices,
-                          n_links = len(edges),n_paths=features.shape[1])
+    assert mode == tf.estimator.ModeKeys.TRAIN
 
 
-def _int64_feature(value):
-    return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
-def _int64_features(value):
-    return tf.train.Feature(int64_list=tf.train.Int64List(value=value))
+    trainables = model.variables
+    grads = tf.gradients(total_loss, trainables)
+    grad_var_pairs = zip(grads, trainables)
 
-def _float_features(value):
-    return tf.train.Feature(float_list=tf.train.FloatList(value=value))
+    summaries = [tf.summary.histogram(var.op.name, var) for var in trainables]
+    summaries += [tf.summary.histogram(g.op.name, g) for g in grads if g is not None]
 
+    decayed_lr = tf.train.exponential_decay(params.learning_rate,
+                                            tf.train.get_global_step(), 50000,
+                                            0.9, staircase=True)
 
-def make_tfrecord(file_name,samples):
-    writer = tf.python_io.TFRecordWriter(file_name)
+    optimizer=tf.train.AdamOptimizer(decayed_lr)
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    with tf.control_dependencies(update_ops):
+        train_op = optimizer.apply_gradients(grad_var_pairs,
+            global_step=tf.train.get_global_step())
 
-    for a,d in zip(samples.features,samples.labels):
-        example = tf.train.Example(features=tf.train.Features(feature={
-            'traffic':_float_features(a),
-            'delay':_float_features(d),
-            'links':_int64_features(samples.links),
-            'paths':_int64_features(samples.paths),
-            'sequances':_int64_features(samples.sequances),
-            'n_links':_int64_feature(samples.n_links), 
-            'n_paths':_int64_feature(samples.n_paths)
-        }
-        ))
+    return tf.estimator.EstimatorSpec(mode, 
+            loss=total_loss, 
+            train_op=train_op,
+        )
 
-        writer.write(example.SerializeToString())
-    writer.close()
+def drop_model_fn(
+   features, # This is batch_features from input_fn
+   labels,   # This is batch_labrange
+   mode,     # An instance of tf.estimator.ModeKeys
+   params):  # Additional configuration
 
-def make_tfrecord2(file_name,ned_file,routing_file,data_file):
-
-    con,n = ned2lists(ned_file)
-    Global, TM_index, delay_index, jitter_index, drop_index = load(data_file,n, True)
-    R = load_routing(routing_file)
-    paths = make_paths(R, con)
-    link_indices, path_indices, sequ_indices = make_indices(paths)
-
-    delay = Global.take(delay_index,axis=1).values
-    TM = Global.take(TM_index,axis=1).values
-    jitter =  Global.take(jitter_index,axis=1).values
-    drops =  Global.take(drop_index,axis=1).values
-
-    n_paths = delay.shape[1]
-    n_links = max(max(paths))+1
-
-    writer = tf.python_io.TFRecordWriter(file_name)
-    n_total = len(path_indices)
-
-    for a,d,j,l in zip(TM,delay,jitter,drops):
-        example = tf.train.Example(features=tf.train.Features(feature={
-            'traffic':_float_features(a),
-            'delay':_float_features(d),
-            'jitter':_float_features(j),
-            'drops':_float_features(l),
-            'links':_int64_features(link_indices),
-            'paths':_int64_features(path_indices),
-            'sequances':_int64_features(sequ_indices),
-            'n_links':_int64_feature(n_links), 
-            'n_paths':_int64_feature(n_paths),
-            'n_total':_int64_feature(n_total)
-        }
-        ))
-
-        writer.write(example.SerializeToString())
-    writer.close()
-
-def infer_routing_nsf(data_file):
-    rf=re.sub(r'dGlobal_S\d+_R','Routing_', data_file).\
-    replace('datasets','routing')
-    return rf
-
-def infer_routing_nsf2(data_file):
-    rf=re.sub(r'dGlobal_\d+_\d+_','Routing_', data_file).\
-    replace('datasets2','routing2')
-    return rf
-
-
-
-def infer_routing_nsf3(data_file):
-    rf=re.sub(r'dGlobal_\d+_\d+_','Routing_', data_file).\
-    replace('delaysNsfnet','routingNsfnet')
-    return rf
-
-def infer_routing_geant(data_file):
-    rf=re.sub(r'dGlobal_G_\d+_\d+_','RoutingGeant2_', data_file).\
-    replace('delaysGeant2','routingsGeant2')
-    return rf
-
-def infer_routing_gbn(data_file):
-    rf=re.sub(r'dGlobal_\d+_\d+_','Routing_', data_file).\
-    replace('delay','routing')
-    return rf
-
-
-def input_fn(samples,hparams,shuffle=True):
-    f = ((samples.features-0.2)/0.15).astype(np.float32)
-    l = ((samples.labels-2.0)/1.5).astype(np.float32)
-    
-    ds = tf.data.Dataset.from_tensor_slices(({'traffic':f},l))
-    
-    ds1 = tf.data.Dataset.from_tensors({samples._fields[i]:samples[i] for i in range(2, len(samples))})
-    ds1 = ds1.repeat()
    
-    if shuffle:
-        ds = ds.repeat()
-        ds = ds.shuffle(1000)
-    
-    ds=tf.data.Dataset.zip((ds,ds1))
-    ds = ds.batch(hparams.batch_size)
-    sample = ds.make_one_shot_iterator().get_next()
-    sample[0][0].update(sample[1])
-    return sample[0]
+    model = RouteNet(params, output_units=1, final_activation=None)
+    model.build()
 
-def parse(serialized, target='delay'):
+    logits = model(features, training=mode==tf.estimator.ModeKeys.TRAIN)
+    logits = tf.squeeze(logits)
+    predictions = tf.math.sigmoid(logits)
+
+    if mode == tf.estimator.ModeKeys.PREDICT:
+        return tf.estimator.EstimatorSpec(mode, 
+            predictions={'drops':predictions, 'logits':logits}
+            )
+
+    with tf.name_scope('binomial_loss'):
+        x=features
+        y=labels
+
+        loss_ratio = y['drops']/x['packets']
+        # Binomial negative Log-likelihood
+        loss = tf.reduce_sum(x['packets']*tf.nn.sigmoid_cross_entropy_with_logits(
+            labels = loss_ratio,
+            logits = logits
+        ))/np.float32(1e5)
+
+    regularization_loss = sum(model.losses)
+    total_loss = loss + regularization_loss
+    
+    tf.summary.scalar('regularization_loss', regularization_loss)
+
+
+    if mode == tf.estimator.ModeKeys.EVAL:
+        return tf.estimator.EstimatorSpec(
+            mode,loss=loss,
+            eval_metric_ops={
+                'label/mean/drops':tf.metrics.mean(loss_ratio),
+                'prediction/mean/drops': tf.metrics.mean(predictions),
+                'mae/drops':tf.metrics.mean_absolute_error(loss_ratio, predictions),
+                'rho/drops':tf.contrib.metrics.streaming_pearson_correlation(labels=loss_ratio,predictions=predictions)
+            }
+        )
+    
+    assert mode == tf.estimator.ModeKeys.TRAIN
+
+
+    trainables = model.trainable_variables
+    grads = tf.gradients(total_loss, trainables)
+    grad_var_pairs = zip(grads, trainables)
+
+    summaries = [tf.summary.histogram(var.op.name, var) for var in trainables]
+    summaries += [tf.summary.histogram(g.op.name, g) for g in grads if g is not None]
+
+    decayed_lr = tf.train.exponential_decay(params.learning_rate,
+                                            tf.train.get_global_step(), 50000,
+                                            0.9, staircase=True)
+    # TODO use decay !
+    optimizer=tf.train.AdamOptimizer(decayed_lr)
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    with tf.control_dependencies(update_ops):
+        train_op = optimizer.apply_gradients(grad_var_pairs,
+            global_step=tf.train.get_global_step())
+
+    return tf.estimator.EstimatorSpec(mode, 
+            loss=total_loss, 
+            train_op=train_op,
+        )
+
+def scale_fn(k, val):
+    '''Scales given feature
+    Args:
+        k: key
+        val: tensor value
     '''
-    Target is the name of predicted variable
+
+    if k == 'traffic':
+        return (val-0.18)/.15
+    if k == 'capacities':
+        return val/10.0
+
+    return val
+
+
+
+def parse(serialized, target=None, normalize=True):
+    '''
+    Target is the name of predicted variable-deprecated
     '''
     with tf.device("/cpu:0"):
         with tf.name_scope('parse'):    
-            features = tf.parse_single_example(
+            #TODO add feature spec class
+            features = tf.io.parse_single_example(
                 serialized,
                 features={
                     'traffic':tf.VarLenFeature(tf.float32),
-                    target:tf.VarLenFeature(tf.float32),
+                    'delay':tf.VarLenFeature(tf.float32),
+                    'logdelay':tf.VarLenFeature(tf.float32),
+                    'jitter':tf.VarLenFeature(tf.float32),
+                    'drops':tf.VarLenFeature(tf.float32),
+                    'packets':tf.VarLenFeature(tf.float32),
+                    'capacities':tf.VarLenFeature(tf.float32),
                     'links':tf.VarLenFeature(tf.int64),
                     'paths':tf.VarLenFeature(tf.int64),
-                    'sequances':tf.VarLenFeature(tf.int64),
+                    'sequences':tf.VarLenFeature(tf.int64),
                     'n_links':tf.FixedLenFeature([],tf.int64), 
                     'n_paths':tf.FixedLenFeature([],tf.int64),
                     'n_total':tf.FixedLenFeature([],tf.int64)
                 })
-            for k in ['traffic',target,'links','paths','sequances']:
-                features[k] = tf.sparse_tensor_to_dense(features[k])
-                if k == 'delay':
-                    features[k] = (features[k]-2.8)/2.5
-                if k == 'traffic':
-                    features[k] = (features[k]-0.5)/.5
-                if k == 'jitter':
-                    features[k] = (features[k]-1.5)/1.5
+            for k in ['traffic','delay','logdelay','jitter','drops','packets','capacities','links','paths','sequences']:
+                features[k] = tf.sparse.to_dense( features[k] )
+                if normalize:
+                    features[k] = scale_fn(k, features[k])
 
 
-
-    return {k:v for k,v in features.items() if k is not target },features[target]
+    #return {k:v for k,v in features.items() if k is not target },features[target]
+    return features
 
 def cummax(alist, extractor):
     with tf.name_scope('cummax'):
@@ -334,18 +361,26 @@ def transformation_func(it, batch_size=32):
     with tf.name_scope("transformation_func"):
         vs = [it.get_next() for _ in range(batch_size)]
         
-        links_cummax = cummax(vs,lambda v:v[0]['links'] )
-        paths_cummax = cummax(vs,lambda v:v[0]['paths'] )
+        links_cummax = cummax(vs,lambda v:v['links'] )
+        paths_cummax = cummax(vs,lambda v:v['paths'] )
         
         tensors = ({
-                'traffic':tf.concat([v[0]['traffic'] for v in vs], axis=0),
-                'sequances':tf.concat([v[0]['sequances'] for v in vs], axis=0),
-                'links':tf.concat([v[0]['links'] + m for v,m in zip(vs, links_cummax) ], axis=0),
-                'paths':tf.concat([v[0]['paths'] + m for v,m in zip(vs, paths_cummax) ], axis=0),
-                'n_links':tf.math.add_n([v[0]['n_links'] for v in vs]),
-                'n_paths':tf.math.add_n([v[0]['n_paths'] for v in vs]),
-                'n_total':tf.math.add_n([v[0]['n_total'] for v in vs])
-            },   tf.concat([v[1] for v in vs], axis=0))
+                'traffic':tf.concat([v['traffic'] for v in vs], axis=0),
+                'capacities': tf.concat([v['capacities'] for v in vs], axis=0),
+                'sequences':tf.concat([v['sequences'] for v in vs], axis=0),
+                'packets':tf.concat([v['packets'] for v in vs], axis=0),
+                'links':tf.concat([v['links'] + m for v,m in zip(vs, links_cummax) ], axis=0),
+                'paths':tf.concat([v['paths'] + m for v,m in zip(vs, paths_cummax) ], axis=0),
+                'n_links':tf.math.add_n([v['n_links'] for v in vs]),
+                'n_paths':tf.math.add_n([v['n_paths'] for v in vs]),
+                'n_total':tf.math.add_n([v['n_total'] for v in vs])
+            },   {
+                'delay' : tf.concat([v['delay'] for v in vs], axis=0),
+                'logdelay' : tf.concat([v['logdelay'] for v in vs], axis=0),
+                'drops' : tf.concat([v['drops'] for v in vs], axis=0),
+                'jitter' : tf.concat([v['jitter'] for v in vs], axis=0),
+                }
+            )
     
     return tensors
 
@@ -354,11 +389,15 @@ def tfrecord_input_fn(filenames,hparams,shuffle_buf=1000, target='delay'):
     files = tf.data.Dataset.from_tensor_slices(filenames)
     files = files.shuffle(len(filenames))
 
-    ds = files.apply(tf.contrib.data.parallel_interleave(
+    ds = files.apply(tf.data.experimental.parallel_interleave(
         tf.data.TFRecordDataset, cycle_length=4))
 
     if shuffle_buf:
-        ds = ds.apply(tf.contrib.data.shuffle_and_repeat(shuffle_buf))
+        ds = ds.apply(tf.data.experimental.shuffle_and_repeat(shuffle_buf))
+    else :
+        # sample 10 % for evaluation because it is time consuming
+        ds = ds.filter(lambda x: tf.random_uniform(shape=())< 0.1)
+
     ds = ds.map(lambda buf:parse(buf,target), 
         num_parallel_calls=2)
     ds=ds.prefetch(10)
@@ -369,188 +408,35 @@ def tfrecord_input_fn(filenames,hparams,shuffle_buf=1000, target='delay'):
 
     return sample
 
-class ComnetModel(tf.keras.Model):
-    def __init__(self,hparams, output_units=1, final_activation=None):
-        super(ComnetModel, self).__init__()
-        self.hparams = hparams
+def serving_input_receiver_fn():
+    """
+    This is used to define inputs to serve the model.
+    returns: ServingInputReceiver
+    """
+    receiver_tensors = {
+        'capacities': tf.placeholder(tf.float32, [None]),
+        'traffic': tf.placeholder(tf.float32, [None]),
+        'links': tf.placeholder(tf.int32, [None]),
+        'paths': tf.placeholder(tf.int32, [None]),
+        'sequences': tf.placeholder(tf.int32, [None]),
+        'n_links': tf.placeholder(tf.int32, []),
+        'n_paths':tf.placeholder(tf.int32, []),
+    }
 
-        self.edge_update = tf.keras.layers.GRUCell(hparams.link_state_dim)
-        self.path_update = tf.keras.layers.GRUCell(hparams.path_state_dim)
-
-        
-        self.readout = tf.keras.models.Sequential()
-
-        self.readout.add(keras.layers.Dense(hparams.readout_units, 
-                activation=tf.nn.selu,
-                kernel_regularizer=tf.contrib.layers.l2_regularizer(hparams.l2)))
-        self.readout.add(keras.layers.Dropout(rate=hparams.dropout_rate))
-        self.readout.add(keras.layers.Dense(hparams.readout_units, 
-                activation=tf.nn.selu,
-                kernel_regularizer=tf.contrib.layers.l2_regularizer(hparams.l2)))
-        self.readout.add(keras.layers.Dropout(rate=hparams.dropout_rate))
-
-        self.readout.add(keras.layers.Dense(output_units, 
-                kernel_regularizer=tf.contrib.layers.l2_regularizer(hparams.l2_2),
-                activation = final_activation ) )
-
-            
-    def build(self, input_shape=None):
-        del input_shape
-        self.edge_update.build(tf.TensorShape([None,self.hparams.path_state_dim]))
-        self.path_update.build(tf.TensorShape([None,self.hparams.link_state_dim]))
-        self.readout.build(input_shape = [None,self.hparams.path_state_dim])
-        self.built = True
-    
-    
-    def call(self, inputs, training=False):
-        f_ = inputs
-        shape = tf.stack([f_['n_links'],self.hparams.link_state_dim], axis=0)
-        link_state = tf.zeros(shape)
-        shape = tf.stack([f_['n_paths'],self.hparams.path_state_dim-1], axis=0)
-        path_state = tf.concat([
-            tf.expand_dims(f_['traffic'][0:f_["n_paths"]],axis=1),
-            tf.zeros(shape)
-        ], axis=1)
-
-        links = f_['links']
-        paths = f_['paths']
-        seqs=  f_['sequances']
-        
-        for _ in range(self.hparams.T):
-        
-            h_tild = tf.gather(link_state,links)
-
-            ids=tf.stack([paths, seqs], axis=1)            
-            max_len = tf.reduce_max(seqs)+1
-            shape = tf.stack([f_['n_paths'], max_len, self.hparams.link_state_dim])
-            lens = tf.segment_sum(data=tf.ones_like(paths),
-                                    segment_ids=paths)
-
-            link_inputs = tf.scatter_nd(ids, h_tild, shape)
-            outputs, path_state = tf.nn.dynamic_rnn(self.path_update,
-                                                    link_inputs,
-                                                    sequence_length=lens,
-                                                    initial_state = path_state,
-                                                    dtype=tf.float32)
-            m = tf.gather_nd(outputs,ids)
-            m = tf.unsorted_segment_sum(m, links ,f_['n_links'])
-
-            #Keras cell expects a list
-            link_state,_ = self.edge_update(m, [link_state])
-            
-        if self.hparams.learn_embedding:
-            r = self.readout(path_state,training=training)
-        else:
-            r = self.readout(tf.stop_gradient(path_state),training=training)
-
-        return r
-    
+    # Convert give inputs to adjust to the model.
+    features = {k: scale_fn(k,v) for k,v in receiver_tensors.items() }
+    return tf.estimator.export.ServingInputReceiver(receiver_tensors=receiver_tensors,
+                                                    features=features)
 
 
-def model_fn(
-   features, # This is batch_features from input_fn
-   labels,   # This is batch_labrange
-   mode,     # An instance of tf.estimator.ModeKeys
-   params):  # Additional configuration
-
-   
-    model = ComnetModel(params)
-    model.build()
-
-    def fn(x):
-        r = model(x,training=mode==tf.estimator.ModeKeys.TRAIN)
-        # TODO padding breaks metrics !
-        #r = tf.pad(r,[[0,tf.shape(labels)[1] - tf.shape(r)[0]],[0,0]])
-        return r
-
-
-    #predictions = tf.map_fn(fn, features,dtype=tf.float32)
-    predictions = fn(features)
-
-    predictions = tf.squeeze(predictions)
-
-    if mode == tf.estimator.ModeKeys.PREDICT:
-        return tf.estimator.EstimatorSpec(mode, 
-            predictions={'predictions':predictions})
-
-    loss =  tf.losses.mean_squared_error(
-        labels=labels,
-        predictions = predictions,
-        reduction=tf.losses.Reduction.MEAN
-    )
-
-    #print(model.variables)
-    #print('loss', model.losses,sum(model.losses))
-    #print(tf.losses.get_regularization_loss())
-    #raise Exception('Stop')
-    regularization_loss = sum(model.losses)
-    total_loss = loss + regularization_loss
-    
-    tf.summary.scalar('loss', loss)
-    tf.summary.scalar('regularization_loss', regularization_loss)
-
-
-
-    #TODO R**2
-    if mode == tf.estimator.ModeKeys.EVAL:
-        return tf.estimator.EstimatorSpec(
-            mode,loss=loss,
-            eval_metric_ops={
-                'label/mean':tf.metrics.mean(labels),
-                'prediction/mean': tf.metrics.mean(predictions),
-                'mae':tf.metrics.mean_absolute_error(labels, predictions),
-                'rho':tf.contrib.metrics.streaming_pearson_correlation(labels=labels,predictions=predictions)
-            }
-        )
-    
-    assert mode == tf.estimator.ModeKeys.TRAIN
-
-
-    trainables = model.variables
-    grads = tf.gradients(total_loss, trainables)
-    grad_var_pairs = zip(grads, trainables)
-
-    summaries = [tf.summary.histogram(var.op.name, var) for var in trainables]
-    summaries += [tf.summary.histogram(g.op.name, g) for g in grads if g is not None]
-
-    decayed_lr = tf.train.exponential_decay(params.learning_rate,
-                                            tf.train.get_global_step(), 10000,
-                                            0.7, staircase=True)
-    optimizer=tf.train.AdamOptimizer(decayed_lr)
-    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-    with tf.control_dependencies(update_ops):
-        train_op = optimizer.apply_gradients(grad_var_pairs,
-            global_step=tf.train.get_global_step())
-
-    return tf.estimator.EstimatorSpec(mode, 
-            loss=loss, 
-            train_op=train_op,
-        )
-    
-
-def flush():
-    sys.stdout.flush()
-    sys.stderr.flush()
-
-hparams = tf.contrib.training.HParams(
-    node_count=14,
-    link_state_dim=4, 
-    path_state_dim=2,
-    T=3,
-    readout_units=8,
-    learning_rate=0.001,
-    batch_size=32,
-    dropout_rate=0.5,
-    l2=0.1,
-    l2_2=0.01,
-    learn_embedding=True # If false, only the readout is trained
-)
 def train(args):
     print(args)
     tf.logging.set_verbosity('INFO')    
 
     if args.hparams:
         hparams.parse(args.hparams)
+
+    model_fn = delay_model_fn if args.target =='delay' else drop_model_fn
 
     estimator = tf.estimator.Estimator( 
         model_fn = model_fn, 
@@ -559,45 +445,40 @@ def train(args):
         warm_start_from=args.warm
         )
 
+    best_exporter = tf.estimator.BestExporter(
+        serving_input_receiver_fn=serving_input_receiver_fn,
+        exports_to_keep=2)
+
+    latest_exporter = tf.estimator.LatestExporter(
+        name="latests",
+        serving_input_receiver_fn=serving_input_receiver_fn,
+        exports_to_keep=5)
+
+
     train_spec = tf.estimator.TrainSpec(input_fn=lambda:tfrecord_input_fn(args.train,hparams,shuffle_buf=args.shuffle_buf,target=args.target), 
        max_steps=args.train_steps)
-    eval_spec = tf.estimator.EvalSpec(input_fn=lambda:tfrecord_input_fn(args.eval_,hparams,shuffle_buf=None,target=args.target),steps=None)
+    eval_spec = tf.estimator.EvalSpec(input_fn=lambda:tfrecord_input_fn(args.evaluation,hparams,shuffle_buf=None,target=args.target),
+        steps=args.eval_steps,
+        exporters=[best_exporter,latest_exporter],
+        #throttle_secs=1800)
+        throttle_secs=600)
     
     tf.estimator.train_and_evaluate(estimator, train_spec, eval_spec)
 
 
-def data(args):
-    print(args)
-    #if not args.o:
-    #    args.o = args.d.replace('txt', 'tfrecords')
-    for data_file in args.d:
-        tf_file = data_file.replace('txt', 'tfrecords')
-        if not args.r:
-            args.r = infer_routing_nsf(data_file)
-        tf.logging.info('Starting ', data_file)
-        make_tfrecord2(tf_file,args.ned,args.r,data_file)
-
-
 def main():
-    parser = argparse.ArgumentParser(description='Netwrok routing ML tool')
+    parser = argparse.ArgumentParser(description='RouteNet script')
 
     subparsers = parser.add_subparsers(help='sub-command help')
-    parser_data = subparsers.add_parser('data', help='data processing')
-    parser_data.add_argument('-d', help='data file',  type=str ,  required=True, nargs='+')
-    parser_data.add_argument('-r', help='roting file',  type=str ,  required=False)
-    parser_data.add_argument('--ned', help='Topology ned file',  type=str ,  required=True)
-    #parser_data.add_argument('-o', help='output file, default to input wit tfrecords extention',  type=str)
-    parser_data.set_defaults(func=data)
 
     parser_train = subparsers.add_parser('train', help='Train options')
     parser_train.add_argument('--hparams', type=str,
                         help='Comma separated list of "name=value" pairs.')
     parser_train.add_argument('--train', help='Train Tfrecords files',  type=str ,nargs='+')
-    parser_train.add_argument('--eval_', help='Evaluation Tfrecords files',  type=str ,nargs='+')
+    parser_train.add_argument('--evaluation', help='Evaluation Tfrecords files',  type=str ,nargs='+')
     parser_train.add_argument('--model_dir', help='Model directory',  type=str )
     parser_train.add_argument('--train_steps', help='Training steps',  type=int, default=100 )
     parser_train.add_argument('--eval_steps', help='Evaluation steps, defaul None= all',  type=int, default=None )
-    parser_train.add_argument('--epochs', help='Train epochs',  type=int, default=300 )
     parser_train.add_argument('--shuffle_buf',help = "Buffer size for samples shuffling", type=int, default=10000)
     parser_train.add_argument('--target',help = "Predicted variable", type=str, default='delay')
     parser_train.add_argument('--warm',help = "Warm start from", type=str, default=None)
