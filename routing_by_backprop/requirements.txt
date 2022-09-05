@@ -1,0 +1,9 @@
+networkx>=2.5
+numpy>=1.19.0
+pandas>=1.1.1
+jax>=0.2.14
+jaxlib>=0.1.67
+git+git://github.com/deepmind/jraph.git
+dm-haiku>=0.0.4
+optax>=0.0.8
+matplotlib>=3.3.1
