@@ -13,7 +13,6 @@ import numpy as np
 from scipy.stats import beta
 
 import util
-import jaxon
 
 
 class GraphProvider:
