@@ -24,33 +24,7 @@ pdf:all
 	python3 book.py
 test:all
 	python -m unittest test.py
-	
-sync: all
-	rsync -avx --inplace --delete \
-	  sndlib-networks-xml/abilene.graphml \
-	  sndlib-networks-xml/pdh.graphml \
-	  sndlib-networks-xml/giul39.graphml \
-	  sndlib-networks-xml/nobel-germany.graphml \
-	  sndlib-networks-xml/france.graphml \
-	  sndlib-networks-xml/janos-us.graphml \
-	  sndlib-networks-xml/ta1.graphml \
-	  sndlib-networks-xml/di-yuan.graphml \
-	  sndlib-networks-xml/geant.graphml \
-	  sndlib-networks-xml/india35.graphml \
-	  sndlib-networks-xml/cost266.graphml \
-	  sndlib-networks-xml/pioro40.graphml \
-	  sndlib-networks-xml/dfn-gwin.graphml \
-	  sndlib-networks-xml/newyork.graphml \
-	  sndlib-networks-xml/atlanta.graphml \
-	  sndlib-networks-xml/sun.graphml \
-	  sndlib-networks-xml/dfn-bwin.graphml \
-	  sndlib-networks-xml/polska.graphml \
-	  sndlib-networks-xml/nobel-eu.graphml \
-	  sndlib-networks-xml/nobel-us.graphml \
-	  sndlib-networks-xml/norway.graphml \
-	  sndlib-networks-xml/janos-us-ca.graphml \
-	  "$(PLG_PATH)/net"
-	
+
 
 	
 	
