@@ -37,9 +37,23 @@ Below is the example for nsf network topology.
 **If you decide to apply the concepts presented or base on the provided code, please do refer our paper.**
 
 ```
-Fast Network Optimization by Gradient Descent with Learned Differentiable
-Routing
-Krzysztof Rusek, Paul Almasan, Jos ́e Su ́arez-Varela, Piotr Cholda, Albert Cabellos-Aparicio, Pere Barlet-Ros
-CNSM 2022
+@misc{https://doi.org/10.48550/arxiv.2209.10380,
+  doi = {10.48550/ARXIV.2209.10380},
+  
+  url = {https://arxiv.org/abs/2209.10380},
+  
+  author = {Rusek, Krzysztof and Almasan, Paul and Suárez-Varela, José and Chołda, Piotr and Barlet-Ros, Pere and Cabellos-Aparicio, Albert},
+  
+  keywords = {Networking and Internet Architecture (cs.NI), FOS: Computer and information sciences, FOS: Computer and information sciences},
+  
+  title = {Fast Traffic Engineering by Gradient Descent with Learned Differentiable Routing},
+  
+  publisher = {arXiv},
+  
+  year = {2022},
+  
+  copyright = {arXiv.org perpetual, non-exclusive license}
+}
+
 ```
 
