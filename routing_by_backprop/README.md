@@ -1,17 +1,20 @@
-# routing_by_backprop
+# Fast Traffic Engineering by Gradient Descent with
+Learned Differentiable Routing
+#### Link to paper: [[here](https://arxiv.org/abs/2209.10380)]
+#### Krzysztof Rusek, Paul Almasan, José Suárez-Varela, Piotr Chołda, Pere Barlet-Ros, Albert Cabellos-Aparicio
 
-Routing By Backprop (RBB) is a Traffic Engineering (TE) method based on Graph Neural Networks (GNN) and differentiable programming. 
-Thanks to its internal GNN model, RBB builds an end-to-end differentiable function of the target TE problem (_MinMaxLoad_), 
-which enables fast TE optimization via gradient descent. 
-In our evaluation we show the potential of RBB to optimize OSPF (~25% of 
-improvement w.r.t. default OSPF configurations). 
-Likewise, we test the potential of RBB as an initializer of computationally-expensive TE solvers, 
-showing promising prospects for accelerating such type of solvers and achieving efficient online 
-TE optimization.
+Contact: <krusek@agh.edu.pl>
 
-This repository contain code used in the numerical experiments, and allow for reproductioin of our results.
+## Abstract
 
-# Train
+Emerging applications such as the metaverse, telesurgery or cloud computing require increasingly complex operational demands on networks (e.g., ultra-reliable low latency). Likewise, the ever-faster traffic dynamics will demand network control mechanisms that can operate at short timescales (e.g., sub-minute). In this context, Traffic Engineering (TE) is a key component to efficiently control network traffic according to some performance goals (e.g., minimize network congestion).
+This paper presents Routing By Backprop (RBB), a novel TE method based on Graph Neural Networks (GNN) and differentiable programming. Thanks to its internal GNN model, RBB builds an end-to-end differentiable function of the target TE problem (MinMaxLoad). This enables fast TE optimization via gradient descent. In our evaluation, we show the potential of RBB to optimize OSPF-based routing (≈25\% of improvement with respect to default OSPF configurations). Moreover, we test the potential of RBB as an initializer of computationally-intensive TE solvers. The experimental results show promising prospects for accelerating this type of solvers and achieving efficient online TE optimization. 
+
+# Instructions to execute
+
+This repository contains code used in the numerical experiments, and allow for reproductioin of our results.
+
+## Train
 
 First we need to train the model for appropriate large dataset.
 
@@ -19,7 +22,7 @@ First we need to train the model for appropriate large dataset.
 python3 python/sp.py --train_graphs=10 --test_graphs=2 --checkpoint_steps=2
 ```
 
-# Optimize
+## Optimize
 
 Once the model is trained, it can be used for network optimization.
 Below is the example for nsf network topology.
