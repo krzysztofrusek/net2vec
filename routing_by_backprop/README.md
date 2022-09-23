@@ -1,5 +1,4 @@
-# Fast Traffic Engineering by Gradient Descent with
-Learned Differentiable Routing
+# Fast Traffic Engineering by Gradient Descent with Learned Differentiable Routing
 #### Link to paper: [[here](https://arxiv.org/abs/2209.10380)]
 #### Krzysztof Rusek, Paul Almasan, José Suárez-Varela, Piotr Chołda, Pere Barlet-Ros, Albert Cabellos-Aparicio
 
