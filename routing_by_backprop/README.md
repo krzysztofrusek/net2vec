@@ -12,6 +12,7 @@ This paper presents Routing By Backprop (RBB), a novel TE method based on Graph 
 # Instructions to execute
 
 This repository contains code used in the numerical experiments, and allow for reproductioin of our results.
+For outline of the method take a look at our [demo in colab](../jupyter_notebooks/routing_by_backprop_demo.ipynb)
 
 ## Train
 
