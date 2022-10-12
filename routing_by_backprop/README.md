@@ -7,12 +7,16 @@ Contact: <krusek@agh.edu.pl>
 ## Abstract
 
 Emerging applications such as the metaverse, telesurgery or cloud computing require increasingly complex operational demands on networks (e.g., ultra-reliable low latency). Likewise, the ever-faster traffic dynamics will demand network control mechanisms that can operate at short timescales (e.g., sub-minute). In this context, Traffic Engineering (TE) is a key component to efficiently control network traffic according to some performance goals (e.g., minimize network congestion).
+
 This paper presents Routing By Backprop (RBB), a novel TE method based on Graph Neural Networks (GNN) and differentiable programming. Thanks to its internal GNN model, RBB builds an end-to-end differentiable function of the target TE problem (MinMaxLoad). This enables fast TE optimization via gradient descent. In our evaluation, we show the potential of RBB to optimize OSPF-based routing (≈25\% of improvement with respect to default OSPF configurations). Moreover, we test the potential of RBB as an initializer of computationally-intensive TE solvers. The experimental results show promising prospects for accelerating this type of solvers and achieving efficient online TE optimization. 
+
+# Try RBB on Colab
+
+[Take a look at our demo in colab.](../jupyter_notebooks/routing_by_backprop_demo.ipynb)
 
 # Instructions to execute
 
 This repository contains code used in the numerical experiments, and allow for reproductioin of our results.
-For outline of the method take a look at our [demo in colab](../jupyter_notebooks/routing_by_backprop_demo.ipynb)
 
 ## Train
 
