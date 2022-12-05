@@ -44,19 +44,16 @@ Below is the example for nsf network topology.
 **If you decide to apply the concepts presented or base on the provided code, please do refer our paper.**
 
 ```
-@InProceedings{rbb,
-  author = {Rusek, Krzysztof and Almasan, Paul and Suárez-Varela, José and Chołda, Piotr and Barlet-Ros, Pere and Cabellos-Aparicio, Albert},
-  keywords = {Networking and Internet Architecture (cs.NI), FOS: Computer and information sciences, FOS: Computer and information sciences},
-  title = {Fast Traffic Engineering by Gradient Descent with Learned Differentiable Routing},
-  booktitle = "{Proceedings of the 18th IEEE International Conference on Network and Service Management~(CNSM)}",
-  numpages = "5",
-  day = "1",
-  month = nov,
-  year = "2022",
-  address = "Thessaloniki, Greece",
-  language = "english",
-  isbn = "978-3-903176-51-5",
-}
+@INPROCEEDINGS{9964923,
+  author={Rusek, Krzysztof and Almasan, Paul and Suárez-Varela, José and Chołda, Piotr and Barlet-Ros, Pere and Cabellos-Aparicio, Albert},
+  booktitle={2022 18th International Conference on Network and Service Management (CNSM)}, 
+  title={Fast Traffic Engineering by Gradient Descent with Learned Differentiable Routing}, 
+  year={2022},
+  volume={},
+  number={},
+  pages={359-363},
+  doi={10.23919/CNSM55787.2022.9964923}}
+
 
 ```
 
